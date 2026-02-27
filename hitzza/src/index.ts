@@ -1,369 +1,348 @@
 import readline from "readline";
 import { randomUUID } from "crypto";
 
-type Money = number;
+enum PizzaSize {
+  Small = "Small",
+  Medium = "Medium",
+  Large = "Large",
+}
 
-class Ingredient {
+interface IPricedItem {
   id: string;
   name: string;
-  price: Money;
+  getPrice(): number;
+}
 
-  constructor(name: string, price: Money) {
+class Ingredient implements IPricedItem {
+  readonly id: string;
+  
+  constructor(public name: string, private _price: number) {
     this.id = randomUUID();
-    this.name = name;
-    this.price = price;
+  }
+
+  getPrice(): number {
+    return this._price;
+  }
+
+  setPrice(value: number) {
+    if (value >= 0) this._price = value;
   }
 }
 
-class DoughType {
-  id: string;
-  name: string;
-  price: Money;
-  isClassic: boolean;
-
-  constructor(name: string, price: Money, isClassic: boolean = false) {
+class Crust implements IPricedItem {
+  readonly id: string;
+  
+  constructor(public name: string, private _price: number) {
     this.id = randomUUID();
-    this.name = name;
-    this.price = price;
-    this.isClassic = isClassic;
+  }
+
+  getPrice(): number {
+    return this._price;
   }
 }
 
-class Pizza {
-  id: string;
-  name: string;
-  base: DoughType;
-  ingredients: Ingredient[];
-
-  constructor(name: string, base: DoughType, ingredients: Ingredient[]) {
+class PizzaRecipe {
+  readonly id: string;
+  constructor(public name: string, public basePrice: number) {
     this.id = randomUUID();
-    this.name = name;
-    this.base = base;
-    this.ingredients = ingredients;
+  }
+}
+
+abstract class PizzaBase implements IPricedItem {
+  readonly id: string;
+
+  constructor(
+    public name: string,
+    public size: PizzaSize,
+    public crust: Crust
+  ) {
+    this.id = randomUUID();
   }
 
-  get price(): Money {
-    const ingredientsSum = this.ingredients.reduce((sum, i) => sum + i.price, 0);
-    return this.base.price + ingredientsSum;
+  abstract getPrice(): number;
+
+  protected getSizeMultiplier(): number {
+    switch (this.size) {
+      case PizzaSize.Small: return 1.0;
+      case PizzaSize.Medium: return 1.2;
+      case PizzaSize.Large: return 1.4;
+      default: return 1.0;
+    }
+  }
+}
+
+class StandardPizza extends PizzaBase {
+  constructor(
+    recipe: PizzaRecipe,
+    size: PizzaSize,
+    crust: Crust
+  ) {
+    super(recipe.name, size, crust);
+    this.basePrice = recipe.basePrice;
+  }
+
+  private basePrice: number;
+
+  getPrice(): number {
+    return (this.basePrice * this.getSizeMultiplier()) + this.crust.getPrice();
+  }
+}
+
+class CustomPizza extends PizzaBase {
+  constructor(
+    size: PizzaSize,
+    crust: Crust,
+    private ingredients: Ingredient[]
+  ) {
+    super("Custom Pizza", size, crust);
+  }
+
+  getPrice(): number {
+    const ingredientsSum = this.ingredients.reduce((sum, i) => sum + i.getPrice(), 0);
+    return (ingredientsSum * this.getSizeMultiplier()) + this.crust.getPrice();
+  }
+  
+  getIngredientsList(): string {
+      return this.ingredients.map(i => i.name).join(', ');
+  }
+}
+
+class Order implements IPricedItem {
+  id: string;
+  createdAt: Date;
+  items: PizzaBase[] = [];
+  isCompleted: boolean = false;
+
+  constructor(public customerName: string) {
+    this.id = randomUUID();
+    this.createdAt = new Date();
+  }
+  
+  get name(): string { return `Order #${this.id.substring(0,4)}`; }
+
+  addItem(item: PizzaBase) {
+    this.items.push(item);
+  }
+
+  getPrice(): number {
+    return this.items.reduce((sum, item) => sum + item.getPrice(), 0);
   }
 }
 
 class AppState {
   ingredients: Ingredient[] = [];
-  doughTypes: DoughType[] = [];
-  pizzas: Pizza[] = [];
+  crusts: Crust[] = [];
+  recipes: PizzaRecipe[] = [];
+  orders: Order[] = [];
 }
-
 const state = new AppState();
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const ask = (q: string): Promise<string> => new Promise((res) => rl.question(q, res));
 
-function ask(question: string): Promise<string> {
-  return new Promise((resolve) => rl.question(question, resolve));
-}
-
-async function mainMenu(): Promise<void> {
+async function main() {
   while (true) {
-    console.log("\n=== Конструктор пиццы ===");
-    console.log("1. Ингредиенты");
-    console.log("2. Типы основ");
-    console.log("3. Пиццы");
+    console.log("\n=== PIZZA OOP CONSTRUCTOR ===");
+    console.log("1. Управление Ингредиентами");
+    console.log("2. Управление Бортиками");
+    console.log("3. Управление Меню (Рецепты)");
+    console.log("4. СОЗДАТЬ ЗАКАЗ");
+    console.log("5. Список Заказов");
     console.log("0. Выход");
-    const choice = await ask("Выберите пункт: ");
 
+    const choice = await ask("Выбор: ");
     switch (choice.trim()) {
-      case "1":
-        await ingredientsMenu();
-        break;
-      case "2":
-        await doughMenu();
-        break;
-      case "3":
-        await pizzaMenu();
-        break;
-      case "0":
-        rl.close();
-        return;
-      default:
-        console.log("Неизвестная команда.");
+      case "1": await ingredientsMenu(); break;
+      case "2": await crustsMenu(); break;
+      case "3": await recipesMenu(); break;
+      case "4": await createOrderFlow(); break;
+      case "5": await ordersListMenu(); break;
+      case "0": rl.close(); return;
+      default: console.log("Неверный ввод");
     }
   }
 }
 
-async function ingredientsMenu(): Promise<void> {
+async function ingredientsMenu() {
   while (true) {
     console.log("\n--- Ингредиенты ---");
-    console.log("1. Список ингредиентов");
-    console.log("2. Добавить ингредиент");
-    console.log("3. Удалить ингредиент");
+    console.log("1. Добавить");
+    console.log("2. Список");
+    console.log("3. Удалить");
     console.log("0. Назад");
-    const choice = await ask("Выберите пункт: ");
+    const ans = await ask(">> ");
+    
+    if (ans === "0") return;
 
-    if (choice.trim() === "0") {
-      return;
-    }
-
-    switch (choice.trim()) {
-      case "1":
-        listIngredients();
-        break;
-      case "2":
-        await createIngredient();
-        break;
-      case "3":
-        await deleteIngredient();
-        break;
-      default:
-        console.log("Неизвестная команда.");
+    if (ans === "1") {
+      const name = await ask("Название: ");
+      const price = Number(await ask("Цена: "));
+      if (!isNaN(price)) {
+        state.ingredients.push(new Ingredient(name, price));
+        console.log("Сохранено.");
+      }
+    } else if (ans === "2") {
+      state.ingredients.forEach((i, idx) => console.log(`${idx+1}. ${i.name} - ${i.getPrice()}р`));
+    } else if (ans === "3") {
+      state.ingredients.forEach((i, idx) => console.log(`${idx+1}. ${i.name}`));
+      const delIdx = Number(await ask("Номер для удаления: ")) - 1;
+      if (state.ingredients[delIdx]) {
+        state.ingredients.splice(delIdx, 1);
+        console.log("Удалено.");
+      }
     }
   }
 }
 
-function listIngredients(): void {
-  if (state.ingredients.length === 0) {
-    console.log("Ингредиентов пока нет.");
-    return;
+async function crustsMenu() {
+  while (true) {
+    console.log("\n--- Бортики ---");
+    console.log("1. Добавить тип бортика");
+    console.log("2. Список");
+    console.log("3. Удалить");
+    console.log("0. Назад");
+    const ans = await ask(">> ");
+
+    if (ans === "0") return;
+
+    if (ans === "1") {
+      const name = await ask("Название: ");
+      const price = Number(await ask("Цена добавки: "));
+      if (!isNaN(price)) {
+        state.crusts.push(new Crust(name, price));
+        console.log("Сохранено.");
+      }
+    } else if (ans === "2") {
+      state.crusts.forEach((c, idx) => console.log(`${idx+1}. ${c.name} - ${c.getPrice()}р`));
+    } else if (ans === "3") {
+      state.crusts.forEach((c, idx) => console.log(`${idx+1}. ${c.name}`));
+      const delIdx = Number(await ask("Номер для удаления: ")) - 1;
+      if (state.crusts[delIdx]) {
+        state.crusts.splice(delIdx, 1);
+        console.log("Удалено.");
+      }
+    }
   }
-  console.log("\nСписок ингредиентов:");
-  state.ingredients.forEach((ing, index) => {
-    console.log(`${index + 1}. ${ing.name} - ${ing.price.toFixed(2)}₽`);
+}
+
+async function recipesMenu() {
+  while (true) {
+    console.log("\n--- Меню Пиццерии ---");
+    console.log("1. Создать рецепт пиццы");
+    console.log("2. Список рецептов");
+    console.log("3. Удалить рецепт");
+    console.log("0. Назад");
+    const ans = await ask(">> ");
+
+    if (ans === "0") return;
+
+    if (ans === "1") {
+      const name = await ask("Название пиццы: ");
+      const price = Number(await ask("Базовая цена: "));
+      if (!isNaN(price)) {
+        state.recipes.push(new PizzaRecipe(name, price));
+        console.log("Рецепт создан.");
+      }
+    } else if (ans === "2") {
+      state.recipes.forEach((r, idx) => console.log(`${idx+1}. ${r.name} (База: ${r.basePrice}р)`));
+    } else if (ans === "3") {
+      state.recipes.forEach((r, idx) => console.log(`${idx+1}. ${r.name}`));
+      const delIdx = Number(await ask("Номер для удаления: ")) - 1;
+      if (state.recipes[delIdx]) {
+        state.recipes.splice(delIdx, 1);
+        console.log("Удалено.");
+      }
+    }
+  }
+}
+
+async function createOrderFlow() {
+  if (state.crusts.length === 0) { console.log("Сначала создайте хоть один бортик!"); return; }
+  
+  const client = await ask("Имя клиента: ");
+  const order = new Order(client);
+
+  while (true) {
+    console.log(`\nЗаказ: ${order.customerName} | Сумма: ${order.getPrice()}р`);
+    console.log("1. Добавить ПИЦЦУ ИЗ МЕНЮ");
+    console.log("2. Добавить СБОРНУЮ ПИЦЦУ");
+    console.log("0. Завершить формирование");
+    const choice = await ask(">> ");
+
+    if (choice === "0") break;
+
+    console.log("Размер: 1.S 2.M 3.L");
+    const sInput = await ask(">> ");
+    const size = sInput==="3"? PizzaSize.Large : sInput==="2"? PizzaSize.Medium : PizzaSize.Small;
+
+    console.log("Выберите бортик:");
+    state.crusts.forEach((c, i) => console.log(`${i+1}. ${c.name} (+${c.getPrice()}р)`));
+    const cIdx = Number(await ask("Номер >> ")) - 1;
+    if (!state.crusts[cIdx]) { console.log("Ошибка выбора бортика"); continue; }
+    const selectedCrust = state.crusts[cIdx];
+
+    if (choice === "1") {
+      if (state.recipes.length === 0) { console.log("Меню пусто!"); continue; }
+      state.recipes.forEach((r, i) => console.log(`${i+1}. ${r.name} - ${r.basePrice}р`));
+      
+      const rIdx = Number(await ask("Номер пиццы >> ")) - 1;
+      if (state.recipes[rIdx]) {
+        const p = new StandardPizza(state.recipes[rIdx], size, selectedCrust);
+        order.addItem(p);
+        console.log("Пицца добавлена!");
+      }
+
+    } else if (choice === "2") {
+      if (state.ingredients.length === 0) { console.log("Нет ингредиентов!"); continue; }
+      
+      const selectedIngs: Ingredient[] = [];
+      while(true) {
+        console.log("Добавьте ингредиент (0 - стоп):");
+        state.ingredients.forEach((ing, i) => console.log(`${i+1}. ${ing.name} (${ing.getPrice()}р)`));
+        const iIdx = Number(await ask(">> ")) - 1;
+        
+        if (iIdx === -1) break;
+        if (state.ingredients[iIdx]) {
+          selectedIngs.push(state.ingredients[iIdx]);
+          console.log(`+ ${state.ingredients[iIdx].name}`);
+        }
+      }
+      
+      const p = new CustomPizza(size, selectedCrust, selectedIngs);
+      order.addItem(p);
+      console.log("Кастомная пицца добавлена!");
+    }
+  }
+
+  state.orders.push(order);
+  console.log("Заказ оформлен!");
+}
+
+async function ordersListMenu() {
+  console.log("\n1. Показать все");
+  console.log("2. Найти заказы по имени клиента");
+  const ans = await ask(">> ");
+
+  let listToShow = [...state.orders];
+
+  if (ans === "1") {
+    listToShow.sort((a, b) => b.getPrice() - a.getPrice());
+  } else if (ans === "2") {
+    const search = await ask("Введите имя: ");
+    listToShow = listToShow.filter(o => o.customerName.toLowerCase().includes(search.toLowerCase()));
+  }
+
+  listToShow.forEach(o => {
+    console.log(`\n[ID:${o.id.substring(0,4)}] ${o.customerName} - Итого: ${o.getPrice().toFixed(2)}р`);
+    console.log(`Дата: ${o.createdAt.toLocaleString()}`);
+    o.items.forEach(p => {
+      let desc = p.name;
+      if (p instanceof CustomPizza) {
+        desc += ` (Ингр: ${p.getIngredientsList()})`;
+      }
+      console.log(`  - ${desc} [${p.size}, ${p.crust.name}] = ${p.getPrice().toFixed(2)}р`);
+    });
   });
 }
 
-async function createIngredient(): Promise<void> {
-  const name = await ask("Название ингредиента: ");
-  const priceText = await ask("Стоимость ингредиента: ");
-  const price = Number(priceText);
-  if (!name.trim() || isNaN(price) || price < 0) {
-    console.log("Некорректные данные.");
-    return;
-  }
-  state.ingredients.push(new Ingredient(name.trim(), price));
-  console.log("Ингредиент добавлен.");
-}
-
-async function deleteIngredient(): Promise<void> {
-  if (state.ingredients.length === 0) {
-    console.log("Ингредиентов нет.");
-    return;
-  }
-  listIngredients();
-  const indexText = await ask("Номер ингредиента для удаления: ");
-  const index = Number(indexText) - 1;
-  if (index < 0 || index >= state.ingredients.length) {
-    console.log("Некорректный номер.");
-    return;
-  }
-  state.ingredients.splice(index, 1);
-  console.log("Ингредиент удалён.");
-}
-
-async function doughMenu(): Promise<void> {
-  while (true) {
-    console.log("\n--- Типы основ ---");
-    console.log("1. Список основ");
-    console.log("2. Добавить основу");
-    console.log("3. Удалить основу");
-    console.log("0. Назад");
-    const choice = await ask("Выберите пункт: ");
-
-    if (choice.trim() === "0") {
-      return;
-    }
-
-    switch (choice.trim()) {
-      case "1":
-        listDough();
-        break;
-      case "2":
-        await createDough();
-        break;
-      case "3":
-        await deleteDough();
-        break;
-      default:
-        console.log("Неизвестная команда.");
-    }
-  }
-}
-
-function listDough(): void {
-  if (state.doughTypes.length === 0) {
-    console.log("Основ пока нет.");
-    return;
-  }
-  console.log("\nСписок основ:");
-  state.doughTypes.forEach((d, index) => {
-    const mark = d.isClassic ? " (классическая)" : "";
-    console.log(`${index + 1}. ${d.name}${mark} - ${d.price.toFixed(2)}₽`);
-  });
-}
-
-async function createDough(): Promise<void> {
-  const name = await ask("Название основы: ");
-  const priceText = await ask("Стоимость основы: ");
-  const price = Number(priceText);
-  const isClassicAnswer = await ask("Это классическая основа? (y/n): ");
-  const isClassic = isClassicAnswer.trim().toLowerCase() === "y";
-
-  if (!name.trim() || isNaN(price) || price < 0) {
-    console.log("Некорректные данные.");
-    return;
-  }
-
-  const classic = state.doughTypes.find((d) => d.isClassic);
-  if (classic && !isClassic) {
-    const maxPrice = classic.price * 1.2;
-    if (price > maxPrice) {
-      console.log(
-        `Цена не должна превышать 20% от классической (${maxPrice.toFixed(2)}₽).`
-      );
-      return;
-    }
-  }
-
-  if (isClassic) {
-    state.doughTypes.forEach((d) => (d.isClassic = false));
-  }
-
-  state.doughTypes.push(new DoughType(name.trim(), price, isClassic));
-  console.log("Основа добавлена.");
-}
-
-async function deleteDough(): Promise<void> {
-  if (state.doughTypes.length === 0) {
-    console.log("Основ нет.");
-    return;
-  }
-  listDough();
-  const indexText = await ask("Номер основы для удаления: ");
-  const index = Number(indexText) - 1;
-  if (index < 0 || index >= state.doughTypes.length) {
-    console.log("Некорректный номер.");
-    return;
-  }
-  state.doughTypes.splice(index, 1);
-  console.log("Основа удалена.");
-}
-
-async function pizzaMenu(): Promise<void> {
-  while (true) {
-    console.log("\n--- Пиццы ---");
-    console.log("1. Список пицц");
-    console.log("2. Добавить пиццу");
-    console.log("3. Удалить пиццу");
-    console.log("0. Назад");
-    const choice = await ask("Выберите пункт: ");
-
-    if (choice.trim() === "0") {
-      return;
-    }
-
-    switch (choice.trim()) {
-      case "1":
-        listPizzas();
-        break;
-      case "2":
-        await createPizza();
-        break;
-      case "3":
-        await deletePizza();
-        break;
-      default:
-        console.log("Неизвестная команда.");
-    }
-  }
-}
-
-function listPizzas(): void {
-  if (state.pizzas.length === 0) {
-    console.log("Пицц пока нет.");
-    return;
-  }
-  console.log("\nСписок пицц:");
-  state.pizzas.forEach((p, index) => {
-    const ingredientsNames = p.ingredients.map((i) => i.name).join(", ");
-    console.log(
-      `${index + 1}. ${p.name} [${p.base.name}] (${ingredientsNames}) = ${p.price.toFixed(2)}₽`
-    );
-  });
-}
-
-async function createPizza(): Promise<void> {
-  if (state.doughTypes.length === 0) {
-    console.log("Сначала создайте хотя бы одну основу.");
-    return;
-  }
-  if (state.ingredients.length === 0) {
-    console.log("Сначала создайте хотя бы один ингредиент.");
-    return;
-  }
-
-  const name = await ask("Название пиццы: ");
-  if (!name.trim()) {
-    console.log("Название не может быть пустым.");
-    return;
-  }
-
-  listDough();
-  const doughIndexText = await ask("Выберите номер основы: ");
-  const doughIndex = Number(doughIndexText) - 1;
-  const base = state.doughTypes[doughIndex];
-  if (!base) {
-    console.log("Некорректный номер основы.");
-    return;
-  }
-
-  const ingredients: Ingredient[] = [];
-  while (true) {
-    listIngredients();
-    const ingIndexText = await ask(
-      "Номер ингредиента для добавления (0 - закончить): "
-    );
-    const ingIndex = Number(ingIndexText) - 1;
-
-    if (ingIndexText.trim() === "0") {
-      break;
-    }
-
-    const ing = state.ingredients[ingIndex];
-    if (!ing) {
-      console.log("Некорректный номер.");
-      continue;
-    }
-    ingredients.push(ing);
-  }
-
-  if (ingredients.length === 0) {
-    console.log("Нужно выбрать хотя бы один ингредиент.");
-    return;
-  }
-
-  state.pizzas.push(new Pizza(name.trim(), base, ingredients));
-  console.log("Пицца добавлена.");
-}
-
-async function deletePizza(): Promise<void> {
-  if (state.pizzas.length === 0) {
-    console.log("Пицц нет.");
-    return;
-  }
-  listPizzas();
-  const indexText = await ask("Номер пиццы для удаления: ");
-  const index = Number(indexText) - 1;
-  if (index < 0 || index >= state.pizzas.length) {
-    console.log("Некорректный номер.");
-    return;
-  }
-  state.pizzas.splice(index, 1);
-  console.log("Пицца удалена.");
-}
-
-mainMenu().catch((error) => {
-  console.error(error);
-  rl.close();
-});
-
+main().catch(console.error);
